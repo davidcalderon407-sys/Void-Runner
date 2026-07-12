@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>VOID RUNNER — Arcade</title>
+
+<!-- PWA: lets Android/Chrome and iOS/Safari "install" this as a home-screen
+     app (standalone window, own icon) instead of a browser tab. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#080a16">
+<link rel="icon" href="icons/icon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Void Runner">
+<style>
+  :root {
+    --accent: #4fa8ff;
+    --accent-soft: #9fd4ff;
+    --accent2: #57e0b0;
+    --warn: #ffb84f;
+    --danger: #ff5c5c;
+    --panel-bg: rgba(13,17,24,0.6);
+    --panel-border: rgba(255,255,255,0.12);
+    --text: #e8eef5;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000103;
+    overflow: hidden;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  #game { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+  #vignette {
+    position: absolute; inset: 0; pointer-events: none; z-index: 3;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.65) 100%);
+  }
+
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    color: var(--text);
+    /* Solid-ish gradient instead of backdrop-filter: blurring live canvas
+       content behind an element is one of the most expensive things a
+       browser compositor can do, and it was the main cause of the ongoing
+       slowdown — this looks almost identical without that per-frame cost. */
+    background: radial-gradient(ellipse at center, rgba(9,12,20,0.88) 0%, rgba(2,3,6,0.97) 75%);
+    z-index: 10;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .hidden { display: none !important; }
+
+  #startScreen {
+    background: radial-gradient(ellipse at center, rgba(9,12,20,0.5) 0%, rgba(2,3,6,0.8) 85%);
+  }
+
+  .title {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-weight: 900;
+    font-size: clamp(2rem, 8vw, 4.2rem);
+    letter-spacing: 0.1em;
+    color: var(--accent-soft);
+    text-shadow: 0 0 10px rgba(79,168,255,0.7), 0 0 26px rgba(79,168,255,0.35);
+    animation: pulseTitle 3s ease-in-out infinite;
+  }
+  @keyframes pulseTitle {
+    0%, 100% { text-shadow: 0 0 10px rgba(79,168,255,0.7), 0 0 26px rgba(79,168,255,0.35); }
+    50% { text-shadow: 0 0 16px rgba(159,212,255,0.9), 0 0 38px rgba(79,168,255,0.5); }
+  }
+  .subtitle {
+    margin-top: 0.6em;
+    font-size: clamp(0.7rem, 2.2vw, 1rem);
+    letter-spacing: 0.08em;
+    color: var(--accent2);
+    text-shadow: 0 0 8px rgba(87,224,176,0.5);
+  }
+  .instructions {
+    margin-top: 1.6em;
+    color: #b9c8db;
+    font-size: clamp(0.65rem, 1.8vw, 0.9rem);
+    line-height: 1.9;
+    text-shadow: 0 0 4px rgba(120,170,220,0.3);
+  }
+  .instructions b { color: #fff; }
+  .key {
+    display: inline-block;
+    font-family: 'Courier New', monospace;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 1px 8px;
+    margin: 0 2px;
+    box-shadow: 0 0 5px rgba(79,168,255,0.4);
+    color: #fff;
+  }
+
+  .diffLabel {
+    margin-top: 1.6em;
+    font-size: clamp(0.7rem, 2vw, 0.85rem);
+    letter-spacing: 0.2em;
+    color: #9fb3c8;
+    opacity: 0.9;
+  }
+  .difficulty-row {
+    display: flex; gap: 14px; margin-top: 1em; flex-wrap: wrap; justify-content: center;
+  }
+  .diff-card {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    width: 132px; padding: 1.1em 0.6em;
+    background: rgba(16,20,30,0.82);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    color: #fff; cursor: pointer;
+    font-family: inherit;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+  .diff-card:hover, .diff-card:focus-visible { transform: translateY(-5px); background: rgba(25,32,44,0.75); }
+  .diff-card:active { transform: translateY(-1px) scale(0.98); }
+  .diff-icon { font-size: 1.5em; line-height: 1; }
+  .diff-name { font-weight: 800; letter-spacing: 0.08em; font-size: 0.95em; margin-top: 2px; }
+  .diff-desc { font-size: 0.65em; opacity: 0.75; letter-spacing: 0.02em; }
+  .diff-easy { border-color: rgba(87,224,176,0.4); }
+  .diff-easy .diff-icon, .diff-easy .diff-name { color: var(--accent2); }
+  .diff-easy:hover { box-shadow: 0 0 20px rgba(87,224,176,0.35); border-color: var(--accent2); }
+  .diff-normal { border-color: rgba(79,168,255,0.4); }
+  .diff-normal .diff-icon, .diff-normal .diff-name { color: var(--accent); }
+  .diff-normal:hover { box-shadow: 0 0 20px rgba(79,168,255,0.35); border-color: var(--accent); }
+  .diff-hard { border-color: rgba(255,92,92,0.4); }
+  .diff-hard .diff-icon, .diff-hard .diff-name { color: var(--danger); }
+  .diff-hard:hover { box-shadow: 0 0 20px rgba(255,92,92,0.35); border-color: var(--danger); }
+
+  .btn {
+    padding: 0.9em 2.4em;
+    font-size: clamp(0.85rem, 2.4vw, 1.1rem);
+    letter-spacing: 0.1em;
+    font-family: inherit;
+    font-weight: 700;
+    color: #04141f;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 0 18px rgba(79,168,255,0.45);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .btn:hover { transform: scale(1.06); box-shadow: 0 0 26px rgba(79,168,255,0.7); }
+  .btn:active { transform: scale(0.97); }
+  .btn-secondary {
+    background: rgba(255,255,255,0.06);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.3);
+    box-shadow: none;
+  }
+  .btn-secondary:hover { background: rgba(255,255,255,0.14); box-shadow: 0 0 14px rgba(255,255,255,0.2); }
+
+  .menuButtons { display: flex; flex-direction: column; gap: 0.85em; margin-top: 2em; align-items: center; }
+
+  .finalScore { font-size: clamp(1rem, 3vw, 1.4rem); color: #fff; margin-top: 0.4em; font-family: 'Courier New', monospace; }
+  .finalScore span { color: var(--accent-soft); text-shadow: 0 0 8px rgba(79,168,255,0.6); }
+  .newBest { color: var(--warn); text-shadow: 0 0 10px rgba(255,184,79,0.6); margin-top: 0.3em; font-size: 0.9rem; letter-spacing: 0.08em; }
+
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: flex-start;
+    padding: clamp(10px, 2vw, 22px) clamp(12px, 3vw, 28px);
+    gap: clamp(8px, 2vw, 18px);
+    pointer-events: none;
+    font-size: clamp(0.8rem, 2.1vw, 1.05rem);
+    color: var(--text);
+    z-index: 5;
+    font-family: 'Courier New', monospace;
+  }
+  #hud .block {
+    /* Solid background instead of backdrop-filter — see .overlay comment. */
+    background: rgba(14,18,27,0.85);
+    border: 1px solid var(--panel-border);
+    border-radius: clamp(10px, 1.4vw, 16px);
+    padding: clamp(10px, 1.6vw, 18px) clamp(14px, 2.4vw, 24px);
+    min-width: clamp(140px, 20vw, 230px);
+    text-shadow: 0 0 6px rgba(79,168,255,0.4);
+  }
+  #hud .block:first-child { justify-self: start; }
+  #hud .block:last-child { justify-self: end; text-align: right; }
+  #score { color: var(--accent-soft); font-size: 1.4em; font-weight: bold; }
+  #lives { letter-spacing: 4px; font-size: 1.3em; color: var(--danger); text-shadow: 0 0 6px rgba(255,92,92,0.6); }
+  .badgeRow { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .badgeRow:last-child { justify-content: flex-end; }
+  .diffBadge {
+    display: inline-block;
+    font-size: 0.68em;
+    letter-spacing: 0.1em;
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid currentColor;
+  }
+  .diff-easy-badge { color: var(--accent2); }
+  .diff-normal-badge { color: var(--accent); }
+  .diff-hard-badge { color: var(--danger); }
+  #levelBadge { color: var(--warn); border-color: var(--warn); }
+  #energyWrap {
+    width: clamp(120px, 20vw, 200px); height: clamp(11px, 1.6vw, 15px);
+    border: 1px solid var(--accent2);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 0 6px rgba(87,224,176,0.4);
+    margin-top: 6px;
+    margin-left: auto;
+  }
+  #energyBar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    transition: width 0.15s ease;
+  }
+  #energyLabel { font-size: 0.78em; color: var(--accent2); }
+  #spreadIndicator { margin-top: 8px; }
+  #spreadLabel { font-size: 0.78em; color: #c084ff; }
+  #spreadWrap {
+    width: clamp(120px, 20vw, 200px); height: clamp(8px, 1.2vw, 11px);
+    border: 1px solid #c084ff;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 0 6px rgba(192,132,255,0.4);
+    margin-top: 4px;
+    margin-left: auto;
+  }
+  #spreadBar { height: 100%; width: 100%; background: linear-gradient(90deg, #c084ff, #7c5cff); }
+
+  #pauseBtn {
+    pointer-events: auto;
+    justify-self: center;
+    width: clamp(42px, 5.5vw, 60px); height: clamp(42px, 5.5vw, 60px);
+    border-radius: 50%;
+    border: 1px solid rgba(79,168,255,0.5);
+    background: rgba(14,18,27,0.85);
+    color: var(--accent-soft);
+    font-size: clamp(1.1rem, 2vw, 1.5rem);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(79,168,255,0.3);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  #pauseBtn:hover { transform: scale(1.1); box-shadow: 0 0 16px rgba(79,168,255,0.55); }
+  #pauseBtn:active { transform: scale(0.92); }
+
+  #combo {
+    position: absolute; left: 50%; top: 66px; transform: translateX(-50%);
+    color: var(--warn); text-shadow: 0 0 8px rgba(255,184,79,0.6);
+    font-size: clamp(0.8rem, 2.4vw, 1.1rem);
+    opacity: 0; transition: opacity 0.2s ease;
+    z-index: 5; pointer-events: none;
+    letter-spacing: 0.05em;
+    font-family: 'Courier New', monospace;
+  }
+
+  #levelUpBanner {
+    position: absolute; left: 50%; top: 32%; transform: translate(-50%,-50%) scale(0.6);
+    font-size: clamp(1.6rem, 6vw, 3rem);
+    font-weight: 900;
+    color: var(--warn);
+    text-shadow: 0 0 16px rgba(255,184,79,0.7);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 7;
+    letter-spacing: 0.08em;
+  }
+  #levelUpBanner.show { animation: levelPop 1.6s ease forwards; }
+  @keyframes levelPop {
+    0% { opacity: 0; transform: translate(-50%,-50%) scale(0.5); }
+    15% { opacity: 1; transform: translate(-50%,-50%) scale(1.15); }
+    30% { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%,-50%) scale(1) translateY(-24px); }
+  }
+
+  #touchControls { position: absolute; inset: 0; z-index: 4; }
+  #touchControls.hidden { display: none; }
+  #moveJoystickZone { position: absolute; left: 0; bottom: 0; width: 55%; height: 100%; }
+  .joyBase {
+    position: fixed; width: 112px; height: 112px; border-radius: 50%;
+    transform: translate(-50%,-50%); opacity: 0; transition: opacity 0.15s ease;
+    pointer-events: none; z-index: 6;
+    border: 2px solid rgba(79,168,255,0.55); background: rgba(30,45,70,0.35);
+  }
+  .joyKnob {
+    position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #cfe8ff, #4fa8ff 60%, #1c4f80 100%);
+    box-shadow: 0 0 14px rgba(79,168,255,0.6);
+    transform: translate(-50%,-50%);
+  }
+  #shootZone {
+    position: absolute; right: 24px; bottom: 24px;
+    width: 90px; height: 90px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,140,79,0.7);
+    background: rgba(60,35,20,0.4);
+    box-shadow: 0 0 18px rgba(255,140,79,0.35);
+    color: #ffcda0; display: flex; align-items: center; justify-content: center;
+    font-size: 0.75rem; letter-spacing: 0.06em; font-weight: 700;
+    font-family: 'Courier New', monospace;
+    z-index: 6; pointer-events: auto;
+  }
+
+  @media (pointer: coarse) {
+    #touchControls:not(.hidden) { display: block; }
+  }
+  @media (pointer: fine) {
+    #touchControls { display: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+<div id="vignette"></div>
+
+<div id="hud">
+  <div class="block">
+    <div>SCORE</div>
+    <div id="score">0</div>
+    <div id="lives">▲▲▲</div>
+    <div class="badgeRow">
+      <div id="diffBadge" class="diffBadge"></div>
+      <div id="levelBadge" class="diffBadge">NIVEL 1</div>
+    </div>
+  </div>
+  <button id="pauseBtn" aria-label="Pausa">⏸</button>
+  <div class="block">
+    <div id="energyLabel">ENERGY</div>
+    <div id="energyWrap"><div id="energyBar"></div></div>
+    <div style="margin-top:6px;">BEST: <span id="bestScore">0</span></div>
+    <div id="spreadIndicator" class="hidden">
+      <div id="spreadLabel">DISPERSIÓN</div>
+      <div id="spreadWrap"><div id="spreadBar"></div></div>
+    </div>
+  </div>
+</div>
+<div id="combo"></div>
+<div id="levelUpBanner"></div>
+
+<div id="touchControls" class="hidden">
+  <div id="moveJoystickZone">
+    <div id="moveJoystickBase" class="joyBase"><div class="joyKnob"></div></div>
+  </div>
+  <div id="shootZone">FUEGO</div>
+</div>
+
+<div class="overlay" id="startScreen">
+  <div class="title">VOID RUNNER</div>
+  <div class="subtitle">★ ESQUIVA · RECOLECTA · SOBREVIVE ★</div>
+  <div class="instructions">
+    <div><span class="key">WASD</span> o <span class="key">▲▼◀▶</span> — mover nave</div>
+    <div><span class="key">ESPACIO</span> — disparar &nbsp; <span class="key">P</span> — pausa</div>
+    <div>Recoge <b style="color:var(--accent2);">orbes de energía</b>, esquiva <b style="color:var(--danger);">asteroides</b></div>
+    <div>Orbes raros: <b style="color:#c084ff;">disparo disperso</b> y <b style="color:#ff6b8a;">vida extra</b></div>
+  </div>
+  <div class="diffLabel">SELECCIONA DIFICULTAD</div>
+  <div class="difficulty-row">
+    <button class="diff-card diff-easy" data-difficulty="easy">
+      <span class="diff-icon">●</span>
+      <span class="diff-name">FÁCIL</span>
+      <span class="diff-desc">Ritmo relajado, 4 vidas</span>
+    </button>
+    <button class="diff-card diff-normal" data-difficulty="normal">
+      <span class="diff-icon">◆</span>
+      <span class="diff-name">NORMAL</span>
+      <span class="diff-desc">Equilibrado, 3 vidas</span>
+    </button>
+    <button class="diff-card diff-hard" data-difficulty="hard">
+      <span class="diff-icon">▲</span>
+      <span class="diff-name">DIFÍCIL</span>
+      <span class="diff-desc">Sin piedad, 2 vidas</span>
+    </button>
+  </div>
+  <button class="btn btn-secondary" id="exitBtn" style="margin-top:1.8em;">SALIR DEL JUEGO</button>
+</div>
+
+<div class="overlay hidden" id="exitScreen">
+  <div class="title" style="font-size:clamp(1.6rem,6vw,2.6rem);">¡GRACIAS POR JUGAR!</div>
+  <div class="instructions">Ya puedes cerrar esta pestaña o ventana para salir.</div>
+  <button class="btn btn-secondary" id="backToMenuBtn" style="margin-top:2em;">VOLVER AL MENÚ</button>
+</div>
+
+<div class="overlay hidden" id="pauseScreen">
+  <div class="title" style="font-size:clamp(1.8rem,7vw,3.2rem);">PAUSA</div>
+  <div class="menuButtons">
+    <button class="btn" id="resumeBtn">CONTINUAR</button>
+    <button class="btn btn-secondary" id="restartFromPauseBtn">REINICIAR</button>
+    <button class="btn btn-secondary" id="quitBtn">SALIR AL MENÚ</button>
+  </div>
+</div>
+
+<div class="overlay hidden" id="gameOverScreen">
+  <div class="title" style="font-size:clamp(1.8rem,7vw,3.2rem);">GAME OVER</div>
+  <div class="finalScore">PUNTUACIÓN: <span id="finalScore">0</span></div>
+  <div class="newBest hidden" id="newBestLabel">¡NUEVO RÉCORD!</div>
+  <div class="menuButtons">
+    <button class="btn" id="restartBtn">REINTENTAR</button>
+    <button class="btn btn-secondary" id="menuBtn">MENÚ</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let W, H, DPR;
+  const spreadIndicatorEl = document.getElementById('spreadIndicator');
+  const spreadBarEl = document.getElementById('spreadBar');
+
+  // Offscreen layers: static background (sky+nebulae) and planet sprite are
+  // expensive to paint (several gradients across the full screen every frame),
+  // so they're rendered once here and just blitted with drawImage per frame.
+  const bgCanvas = document.createElement('canvas');
+  const bgCtx = bgCanvas.getContext('2d');
+  const planetCanvas = document.createElement('canvas');
+  const planetCtx = planetCanvas.getContext('2d');
+  let planetDraw = { size: 0, offset: 0 };
+  const galaxyCanvas = document.createElement('canvas');
+  const galaxyCtx = galaxyCanvas.getContext('2d');
+  let galaxyDraw = { size: 0, offset: 0 };
+  let galaxyRotation = 0;
+  const orbCanvas = document.createElement('canvas');
+  const orbCtx = orbCanvas.getContext('2d');
+  const spreadOrbCanvas = document.createElement('canvas');
+  const spreadOrbCtx = spreadOrbCanvas.getContext('2d');
+  const lifeOrbCanvas = document.createElement('canvas');
+  const lifeOrbCtx = lifeOrbCanvas.getContext('2d');
+  const ORB_SPRITE_SIZE = 56;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    renderBackgroundLayer();
+    renderPlanetLayer();
+    renderGalaxyLayer();
+    renderOrbSprites();
+  }
+  // Debounced: some mobile browsers fire many resize events in quick bursts
+  // (address-bar show/hide while scrolling, on-screen keyboard, orientation
+  // change) — without this, each one would re-trigger every offscreen-layer
+  // rebuild below and could stall the frame.
+  let resizeDebounce = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeDebounce);
+    resizeDebounce = setTimeout(resize, 150);
+  });
+
+  // ---------- Audio (simple synthesized beeps) ----------
+  let actx = null;
+  function ensureAudio() {
+    if (!actx) {
+      try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; }
+    }
+  }
+  function beep(freq, dur, type, vol, glideTo) {
+    if (!actx) return;
+    const t0 = actx.currentTime;
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = type || 'square';
+    osc.frequency.setValueAtTime(freq, t0);
+    if (glideTo) osc.frequency.exponentialRampToValueAtTime(glideTo, t0 + dur);
+    gain.gain.setValueAtTime(vol || 0.15, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    osc.connect(gain).connect(actx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur);
+  }
+  const sfx = {
+    shoot: () => beep(760, 0.06, 'square', 0.05, 1200),
+    hit:   () => beep(120, 0.35, 'sawtooth', 0.18, 40),
+    orb:   () => beep(660, 0.12, 'triangle', 0.12, 1200),
+    explode: () => beep(90, 0.4, 'sawtooth', 0.2, 30),
+    combo: (n) => beep(500 + n * 60, 0.1, 'triangle', 0.1, 900 + n * 60),
+    pause: () => beep(300, 0.08, 'triangle', 0.08, 220),
+    levelUp: () => beep(520, 0.28, 'triangle', 0.15, 1100),
+    spread: () => beep(700, 0.16, 'sawtooth', 0.13, 1500),
+    lifeUp: () => beep(440, 0.24, 'triangle', 0.14, 880),
+  };
+
+  // ---------- Utility ----------
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const dist2 = (x1,y1,x2,y2) => { const dx=x1-x2, dy=y1-y2; return dx*dx+dy*dy; };
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+
+  // ---------- Difficulty ----------
+  // spawnMult/speedMult are applied on top of the level curve below (they shift
+  // the whole 20-level curve up or down, they don't compound with play time).
+  const DIFFICULTIES = {
+    easy:   { label: 'FÁCIL',   speedMult: 0.75, spawnMult: 1.25, orbMult: 1.15, lives: 4 },
+    normal: { label: 'NORMAL',  speedMult: 1.0,  spawnMult: 1.0,  orbMult: 1.0,  lives: 3 },
+    hard:   { label: 'DIFÍCIL', speedMult: 1.25, spawnMult: 0.82, orbMult: 0.85, lives: 2 },
+  };
+  let currentDifficulty = 'normal';
+
+  // ---------- Level system ----------
+  const MAX_LEVEL = 20;
+  const POINTS_PER_LEVEL = 2000;
+  let level = 1;
+  function levelForScore(s) { return Math.min(MAX_LEVEL, 1 + Math.floor(s / POINTS_PER_LEVEL)); }
+  // 0 at level 1 up to 1 at level 20 — every difficulty knob below rides this
+  // single, bounded curve instead of the play-session clock, so the game can
+  // never spiral past what level 20 is tuned for no matter how long you play.
+  function levelProgress() { return (level - 1) / (MAX_LEVEL - 1); }
+  // Hard ceiling on simultaneous asteroids: even if the spawn timer were to
+  // run faster than expected, the screen can never be flooded beyond this.
+  const MAX_CONCURRENT_ASTEROIDS = 12;
+  const MAX_LIVES = 6;
+  const SPREAD_DURATION = 9;
+
+  // ---------- Starfield & nebula (realistic deep-space background) ----------
+  let stars = [];
+  function initStars() {
+    stars = [];
+    const layers = [
+      { count: 70, speed: 15, size: 1,   color: [255,255,255] },
+      { count: 45, speed: 32, size: 1.5, color: [190,212,255] },
+      { count: 18, speed: 58, size: 2,   color: [255,255,255] },
+    ];
+    layers.forEach(l => {
+      for (let i = 0; i < l.count; i++) {
+        stars.push({
+          x: rand(0, W), y: rand(0, H), speed: l.speed, size: l.size,
+          colorStr: `rgb(${l.color[0]},${l.color[1]},${l.color[2]})`,
+          phase: rand(0, Math.PI * 2), twinkleSpeed: rand(0.6, 2),
+        });
+      }
+    });
+  }
+  const nebulae = [
+    { x: 0.15, y: 0.2,  r: 0.6,  color: 'rgba(90,55,150,0.24)' },
+    { x: 0.85, y: 0.55, r: 0.55, color: 'rgba(25,90,140,0.22)' },
+    { x: 0.4,  y: 0.85, r: 0.5,  color: 'rgba(150,50,90,0.16)' },
+    { x: 0.65, y: 0.15, r: 0.4,  color: 'rgba(60,150,180,0.14)' },
+  ];
+  const planet = { x: 0.84, y: 0.26, r: 0.065 };
+  const galaxy = { x: 0.2, y: 0.78 };
+
+  // ---------- Storage (wrapped: file:// origins, e.g. Safari, can block localStorage) ----------
+  function loadBest() {
+    try { return parseInt(localStorage.getItem('voidRunnerBest') || '0', 10) || 0; }
+    catch (e) { return 0; }
+  }
+  function saveBest(v) {
+    try { localStorage.setItem('voidRunnerBest', String(v)); }
+    catch (e) { /* storage unavailable, ignore */ }
+  }
+
+  // ---------- Game State ----------
+  let state = 'start'; // start | playing | paused | gameover
+  let score = 0, best = loadBest();
+  document.getElementById('bestScore').textContent = best;
+  let lives = 3;
+  let energy = 0; // 0..100
+  let comboCount = 0, comboTimer = 0;
+  let elapsed = 0;
+  let shakeTime = 0, shakeMag = 0;
+
+  const player = {
+    x: 0, y: 0, r: 26,
+    vx: 0, vy: 0,
+    tilt: 0,
+    speed: 560,
+    invuln: 0,
+    thrusterPhase: 0,
+  };
+
+  // Purely decorative ship drifting/banking on the start screen behind the menu.
+  const decoShip = { x: 0, y: 0, vx: 0, vy: 0, tilt: 0, speed: 560, invuln: 0, thrusterPhase: 0 };
+  const DECO_SHIP_SCALE = 2.6;
+  let decoTime = 0;
+
+  // Ship hull/cockpit gradients are static in local space, so build them once
+  // instead of allocating a new CanvasGradient every frame.
+  const playerHullGrad = ctx.createLinearGradient(-26, -40, 26, 30);
+  playerHullGrad.addColorStop(0, '#333c48');
+  playerHullGrad.addColorStop(0.5, '#7c8a9b');
+  playerHullGrad.addColorStop(1, '#c3d0dd');
+  const playerCockpitGrad = ctx.createRadialGradient(0, -18, 0.5, 0, -16, 10);
+  playerCockpitGrad.addColorStop(0, '#eaf7ff');
+  playerCockpitGrad.addColorStop(1, '#3fa9ff');
+
+  let asteroids = [];
+  let orbs = [];
+  let bullets = [];
+  let particles = [];
+
+  let spawnAsteroidTimer = 0, spawnOrbTimer = 0, spawnSpreadTimer = 0, spawnLifeTimer = 0;
+  let shootCooldown = 0;
+  let spreadShotTime = 0;
+
+  function resetGame() {
+    const d = DIFFICULTIES[currentDifficulty];
+    score = 0; lives = d.lives; energy = 0; elapsed = 0; level = 1;
+    comboCount = 0; comboTimer = 0;
+    player.x = W / 2; player.y = H - 120; player.vx = 0; player.vy = 0; player.tilt = 0; player.invuln = 2;
+    touchShoot = false;
+    asteroids = []; orbs = []; bullets = []; particles = [];
+    spawnAsteroidTimer = 0; spawnOrbTimer = 1;
+    spawnSpreadTimer = rand(16, 24); spawnLifeTimer = rand(20, 30);
+    spreadShotTime = 0;
+    shootCooldown = 0;
+    const badge = document.getElementById('diffBadge');
+    badge.textContent = d.label;
+    badge.className = 'diffBadge diff-' + currentDifficulty + '-badge';
+    document.getElementById('levelUpBanner').classList.remove('show');
+    spreadIndicatorEl.classList.add('hidden');
+    updateHud();
+  }
+
+  function updateHud() {
+    document.getElementById('score').textContent = score;
+    document.getElementById('lives').textContent = '▲'.repeat(Math.max(0, lives));
+    document.getElementById('energyBar').style.width = clamp(energy, 0, 100) + '%';
+    document.getElementById('levelBadge').textContent = 'NIVEL ' + level;
+  }
+
+  function triggerLevelUp(lvl) {
+    sfx.levelUp();
+    triggerShake(6, 0.25);
+    let gotLife = false;
+    if (lives < MAX_LIVES) { lives++; gotLife = true; } else { score += 150; }
+    const el = document.getElementById('levelUpBanner');
+    el.textContent = '¡NIVEL ' + lvl + '!' + (gotLife ? '  +1 VIDA' : '');
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+    updateHud();
+  }
+
+  function setTouchControlsVisible(v) {
+    document.getElementById('touchControls').classList.toggle('hidden', !v);
+  }
+
+  // ---------- Input: keyboard ----------
+  const keys = {};
+  window.addEventListener('keydown', (e) => {
+    keys[e.code] = true;
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space'].includes(e.code)) e.preventDefault();
+    if (state === 'start' && (e.code === 'Space' || e.code === 'Enter')) { ensureAudio(); startGame(); }
+    else if (state === 'gameover' && (e.code === 'Space' || e.code === 'Enter')) { ensureAudio(); startGame(); }
+    else if ((e.code === 'KeyP' || e.code === 'Escape') && (state === 'playing' || state === 'paused')) {
+      ensureAudio(); togglePause();
+    }
+  }, { passive: false });
+  window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+  // ---------- Input: touch (floating move joystick + fire button) ----------
+  function createJoystick(zoneEl, baseEl, knobEl, onMove, onEnd) {
+    let active = false, origin = { x: 0, y: 0 };
+    const RADIUS = 56;
+    function start(x, y) {
+      active = true; origin = { x, y };
+      baseEl.style.left = x + 'px'; baseEl.style.top = y + 'px'; baseEl.style.opacity = '1';
+      knobEl.style.transform = 'translate(-50%,-50%)';
+    }
+    function move(x, y) {
+      if (!active) return;
+      let dx = x - origin.x, dy = y - origin.y;
+      const d = Math.hypot(dx, dy);
+      if (d > RADIUS) { dx = dx / d * RADIUS; dy = dy / d * RADIUS; }
+      knobEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      onMove(dx / RADIUS, dy / RADIUS);
+    }
+    function end() { active = false; baseEl.style.opacity = '0'; onEnd(); }
+    zoneEl.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.changedTouches[0]; start(t.clientX, t.clientY); }, { passive: false });
+    zoneEl.addEventListener('touchmove', (e) => { e.preventDefault(); const t = e.changedTouches[0]; move(t.clientX, t.clientY); }, { passive: false });
+    zoneEl.addEventListener('touchend', (e) => { e.preventDefault(); end(); }, { passive: false });
+    zoneEl.addEventListener('touchcancel', () => end());
+    return { isActive: () => active };
+  }
+
+  let joyDirX = 0, joyDirY = 0;
+  createJoystick(
+    document.getElementById('moveJoystickZone'),
+    document.getElementById('moveJoystickBase'),
+    document.querySelector('#moveJoystickBase .joyKnob'),
+    (dx, dy) => { joyDirX = dx; joyDirY = dy; },
+    () => { joyDirX = 0; joyDirY = 0; }
+  );
+
+  let touchShoot = false;
+  const tShoot = document.getElementById('shootZone');
+  tShoot.addEventListener('touchstart', (e) => { e.preventDefault(); ensureAudio(); touchShoot = true; }, { passive: false });
+  tShoot.addEventListener('touchend', (e) => { e.preventDefault(); touchShoot = false; }, { passive: false });
+  tShoot.addEventListener('touchcancel', () => touchShoot = false);
+
+  // ---------- Menu / screen wiring ----------
+  document.querySelectorAll('.diff-card').forEach(btn => {
+    btn.addEventListener('click', () => {
+      ensureAudio();
+      currentDifficulty = btn.dataset.difficulty;
+      startGame();
+    });
+  });
+  document.getElementById('restartBtn').addEventListener('click', () => { ensureAudio(); startGame(); });
+  document.getElementById('menuBtn').addEventListener('click', () => { ensureAudio(); quitToMenu(); });
+  document.getElementById('pauseBtn').addEventListener('click', () => { ensureAudio(); togglePause(); });
+  document.getElementById('resumeBtn').addEventListener('click', () => { ensureAudio(); resumeGame(); });
+  document.getElementById('restartFromPauseBtn').addEventListener('click', () => {
+    ensureAudio();
+    document.getElementById('pauseScreen').classList.add('hidden');
+    startGame();
+  });
+  document.getElementById('quitBtn').addEventListener('click', () => { ensureAudio(); quitToMenu(); });
+
+  // Exit the game entirely. Browsers only allow a page to close its own tab
+  // when that tab/window was itself opened by script — window.close() will
+  // silently no-op on a normal tab the user navigated to directly (there is
+  // no cross-browser/OS API to force that), so this also stops the game loop
+  // and shows a goodbye screen confirming it's safe to close the tab/app.
+  function exitGame() {
+    state = 'start';
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('exitScreen').classList.remove('hidden');
+    setTouchControlsVisible(false);
+    window.close();
+  }
+  document.getElementById('exitBtn').addEventListener('click', () => { ensureAudio(); exitGame(); });
+  document.getElementById('backToMenuBtn').addEventListener('click', () => {
+    document.getElementById('exitScreen').classList.add('hidden');
+    document.getElementById('startScreen').classList.remove('hidden');
+  });
+
+  function startGame() {
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('gameOverScreen').classList.add('hidden');
+    document.getElementById('pauseScreen').classList.add('hidden');
+    document.getElementById('exitScreen').classList.add('hidden');
+    resetGame();
+    state = 'playing';
+    setTouchControlsVisible(true);
+  }
+
+  function pauseGame() {
+    if (state !== 'playing') return;
+    state = 'paused';
+    sfx.pause();
+    document.getElementById('pauseScreen').classList.remove('hidden');
+    setTouchControlsVisible(false);
+  }
+  function resumeGame() {
+    if (state !== 'paused') return;
+    state = 'playing';
+    lastTime = performance.now();
+    document.getElementById('pauseScreen').classList.add('hidden');
+    setTouchControlsVisible(true);
+  }
+  function togglePause() {
+    if (state === 'playing') pauseGame();
+    else if (state === 'paused') resumeGame();
+  }
+  function quitToMenu() {
+    state = 'start';
+    document.getElementById('pauseScreen').classList.add('hidden');
+    document.getElementById('gameOverScreen').classList.add('hidden');
+    document.getElementById('exitScreen').classList.add('hidden');
+    document.getElementById('startScreen').classList.remove('hidden');
+    setTouchControlsVisible(false);
+  }
+
+  function endGame() {
+    state = 'gameover';
+    sfx.explode();
+    if (score > best) {
+      best = score;
+      saveBest(best);
+      document.getElementById('newBestLabel').classList.remove('hidden');
+    } else {
+      document.getElementById('newBestLabel').classList.add('hidden');
+    }
+    document.getElementById('bestScore').textContent = best;
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('gameOverScreen').classList.remove('hidden');
+    setTouchControlsVisible(false);
+  }
+
+  // ---------- Spawning ----------
+  // Spawn interval eases from a relaxed 1.3s at level 1 down to 0.55s at level
+  // 20 (still very playable — under 2 asteroids/sec even at the cap). This
+  // replaces the old formula, which divided by session-time and could spiral
+  // to an asteroid every 0.12s within a couple of minutes of play.
+  function spawnIntervalFor(d) {
+    const base = 1.3, min = 0.55;
+    const interval = base - (base - min) * levelProgress();
+    return clamp(interval * d.spawnMult, 0.4, 1.6);
+  }
+  // Asteroid speed eases from 1x at level 1 to ~1.7x at level 20.
+  function asteroidSpeedMultFor(d) {
+    const base = 1.0, max = 1.7;
+    return (base + (max - base) * levelProgress()) * d.speedMult;
+  }
+  function makeCraters(r) {
+    const n = 2 + Math.floor(rand(0, 3));
+    const craters = [];
+    for (let i = 0; i < n; i++) {
+      const ang = rand(0, Math.PI * 2);
+      const dist = rand(0, r * 0.5);
+      craters.push({ x: Math.cos(ang) * dist, y: Math.sin(ang) * dist, r: rand(r * 0.12, r * 0.28) });
+    }
+    return craters;
+  }
+  function makeAsteroidShape(r) {
+    const pts = [];
+    const n = 8 + Math.floor(rand(0, 4));
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const rr = r * rand(0.7, 1.15);
+      pts.push([Math.cos(a) * rr, Math.sin(a) * rr]);
+    }
+    return pts;
+  }
+  // Asteroids never change appearance after spawning (only position/rotation),
+  // so the rocky gradient + craters are painted once to a small offscreen
+  // sprite instead of being recomputed every frame for every asteroid.
+  function makeAsteroidSprite(r, shape, craters) {
+    const size = Math.ceil(r * 2.4);
+    const off = size / 2;
+    const c = document.createElement('canvas');
+    c.width = size * DPR;
+    c.height = size * DPR;
+    const sctx = c.getContext('2d');
+    sctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    sctx.translate(off, off);
+    sctx.beginPath();
+    shape.forEach(([px, py], i) => { if (i === 0) sctx.moveTo(px, py); else sctx.lineTo(px, py); });
+    sctx.closePath();
+    const grad = sctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r * 1.1);
+    grad.addColorStop(0, '#8d7e6e');
+    grad.addColorStop(0.55, '#5c5148');
+    grad.addColorStop(1, '#2a241e');
+    sctx.fillStyle = grad;
+    sctx.fill();
+    sctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    sctx.lineWidth = 1.3;
+    sctx.stroke();
+    sctx.clip();
+    for (const cr of craters) {
+      sctx.beginPath();
+      sctx.arc(cr.x, cr.y, cr.r, 0, Math.PI * 2);
+      sctx.fillStyle = 'rgba(0,0,0,0.3)';
+      sctx.fill();
+    }
+    return { canvas: c, size, offset: off };
+  }
+
+  // A small, fixed pool of pre-baked sprites (5 shapes x 4 sizes = 20 canvases)
+  // built once at startup and shared by every asteroid spawned. Earlier this
+  // created a brand-new offscreen canvas per asteroid (and more per fragment
+  // whenever one broke apart) — over a longer session those piled up into
+  // hundreds of GPU-backed canvases that the browser was slow to reclaim,
+  // which is why things got sluggish the longer you played.
+  const ASTEROID_SIZES = [15, 23, 31, 40];
+  const ASTEROID_SHAPE_COUNT = 5;
+  let asteroidSpritePool = [];
+  function buildAsteroidSpritePool() {
+    asteroidSpritePool = [];
+    for (let s = 0; s < ASTEROID_SHAPE_COUNT; s++) {
+      const row = [];
+      for (const r of ASTEROID_SIZES) {
+        row.push(makeAsteroidSprite(r, makeAsteroidShape(r), makeCraters(r)));
+      }
+      asteroidSpritePool.push(row);
+    }
+  }
+
+  function spawnAsteroid() {
+    const d = DIFFICULTIES[currentDifficulty];
+    const speedMult = asteroidSpeedMultFor(d);
+    const sizeIndex = Math.floor(rand(0, ASTEROID_SIZES.length));
+    const shapeIndex = Math.floor(rand(0, ASTEROID_SHAPE_COUNT));
+    const r = ASTEROID_SIZES[sizeIndex];
+    asteroids.push({
+      x: rand(r, W - r), y: -r - 10,
+      r,
+      vy: rand(70, 125) * speedMult,
+      vx: rand(-25, 25) * speedMult,
+      rot: rand(0, Math.PI * 2),
+      rotSpeed: rand(-2, 2),
+      hp: sizeIndex >= 2 ? 2 : 1,
+      sprite: asteroidSpritePool[shapeIndex][sizeIndex],
+    });
+  }
+  function spawnOrb() {
+    orbs.push({
+      type: 'energy',
+      x: rand(30, W - 30), y: -20,
+      r: 12,
+      vy: rand(60, 100),
+      phase: rand(0, Math.PI * 2),
+    });
+  }
+  function spawnSpreadOrb() {
+    orbs.push({ type: 'spread', x: rand(30, W - 30), y: -20, r: 14, vy: rand(55, 85), phase: rand(0, Math.PI * 2) });
+  }
+  function spawnLifeOrb() {
+    orbs.push({ type: 'life', x: rand(30, W - 30), y: -20, r: 14, vy: rand(55, 85), phase: rand(0, Math.PI * 2) });
+  }
+
+  // ---------- Particles ----------
+  function spawnExplosion(x, y, color, count = 16) {
+    if (particles.length > 260) return; // safety cap: heavy combo chains shouldn't be able to pile up unbounded particles
+    for (let i = 0; i < count; i++) {
+      const a = rand(0, Math.PI * 2);
+      const sp = rand(50, 240);
+      particles.push({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: rand(0.3, 0.7), maxLife: 0.7, color, size: rand(2, 4),
+      });
+    }
+  }
+  function triggerShake(mag, time) {
+    shakeMag = Math.max(shakeMag, mag);
+    shakeTime = Math.max(shakeTime, time);
+  }
+
+  // ---------- Shooting ----------
+  const SPREAD_ANGLES = [-0.34, -0.17, 0, 0.17, 0.34];
+  function fireBullet() {
+    if (spreadShotTime > 0) {
+      for (const a of SPREAD_ANGLES) {
+        bullets.push({ x: player.x, y: player.y - player.r, vx: Math.sin(a) * 720, vy: -Math.cos(a) * 720, spread: true });
+      }
+      shootCooldown = 0.2;
+    } else {
+      bullets.push({ x: player.x, y: player.y - player.r, vx: 0, vy: -760, spread: false });
+      shootCooldown = 0.16;
+    }
+    sfx.shoot();
+  }
+
+  // ---------- Update ----------
+  let lastTime = performance.now();
+  function loop(now) {
+    let dt = (now - lastTime) / 1000;
+    dt = Math.min(dt, 0.05);
+    lastTime = now;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    const ambientMult = state === 'playing' ? 1 : (state === 'paused' ? 0 : 0.3);
+    if (state !== 'paused') {
+      for (const s of stars) {
+        s.y += s.speed * dt * ambientMult;
+        s.phase += dt * s.twinkleSpeed;
+        if (s.y > H) { s.y = -2; s.x = rand(0, W); }
+      }
+      galaxyRotation += dt * 0.05;
+    }
+
+    if (shakeTime > 0) shakeTime -= dt;
+
+    if (state === 'start') {
+      decoTime += dt;
+      decoShip.x = W * 0.5 + Math.sin(decoTime * 0.32) * Math.min(120, W * 0.16);
+      decoShip.y = H * 0.78 + Math.sin(decoTime * 0.55) * 8;
+      decoShip.vx = Math.cos(decoTime * 0.32) * 220;
+      decoShip.vy = 0;
+      decoShip.tilt = clamp(-decoShip.vx / decoShip.speed, -1, 1) * 0.3;
+      decoShip.thrusterPhase += dt * 14;
+    }
+
+    if (state !== 'playing') return;
+
+    elapsed += dt;
+
+    // player movement
+    const left = keys['ArrowLeft'] || keys['KeyA'];
+    const right = keys['ArrowRight'] || keys['KeyD'];
+    const up = keys['ArrowUp'] || keys['KeyW'];
+    const down = keys['ArrowDown'] || keys['KeyS'];
+    let axisX = (right ? 1 : 0) - (left ? 1 : 0);
+    let axisY = (down ? 1 : 0) - (up ? 1 : 0);
+    if (joyDirX !== 0 || joyDirY !== 0) { axisX = joyDirX; axisY = joyDirY; }
+
+    player.vx += axisX * player.speed * 4.2 * dt;
+    player.vx *= Math.pow(0.0007, dt);
+    player.vx = clamp(player.vx, -player.speed, player.speed);
+    player.x += player.vx * dt;
+    player.x = clamp(player.x, player.r, W - player.r);
+
+    player.vy += axisY * player.speed * 4.2 * dt;
+    player.vy *= Math.pow(0.0007, dt);
+    player.vy = clamp(player.vy, -player.speed, player.speed);
+    player.y += player.vy * dt;
+    player.y = clamp(player.y, 100, H - 40);
+
+    const targetTilt = clamp(player.vx / player.speed, -1, 1) * 0.3;
+    player.tilt += (targetTilt - player.tilt) * clamp(dt * 10, 0, 1);
+
+    player.thrusterPhase += dt * 14;
+    if (player.invuln > 0) player.invuln -= dt;
+
+    // shooting
+    shootCooldown -= dt;
+    const wantShoot = keys['Space'] || touchShoot;
+    if (wantShoot && shootCooldown <= 0) fireBullet();
+
+    // combo timer
+    if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) comboCount = 0; }
+
+    // spawn timers, ramp difficulty smoothly across the 20 levels
+    const d = DIFFICULTIES[currentDifficulty];
+    spawnAsteroidTimer -= dt;
+    if (spawnAsteroidTimer <= 0) {
+      if (asteroids.length < MAX_CONCURRENT_ASTEROIDS) spawnAsteroid();
+      spawnAsteroidTimer = spawnIntervalFor(d);
+    }
+    spawnOrbTimer -= dt;
+    if (spawnOrbTimer <= 0) {
+      spawnOrb();
+      spawnOrbTimer = rand(1.6, 2.8) / d.orbMult;
+    }
+    spawnSpreadTimer -= dt;
+    if (spawnSpreadTimer <= 0) {
+      spawnSpreadOrb();
+      spawnSpreadTimer = rand(22, 34);
+    }
+    spawnLifeTimer -= dt;
+    if (spawnLifeTimer <= 0) {
+      if (lives < MAX_LIVES) spawnLifeOrb();
+      spawnLifeTimer = rand(20, 30);
+    }
+
+    if (spreadShotTime > 0) {
+      spreadShotTime -= dt;
+      if (spreadShotTime <= 0) {
+        spreadShotTime = 0;
+        spreadIndicatorEl.classList.add('hidden');
+      } else {
+        spreadBarEl.style.width = (spreadShotTime / SPREAD_DURATION * 100) + '%';
+      }
+    }
+
+    // bullets
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i];
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      if (b.y < -20 || b.x < -30 || b.x > W + 30) bullets.splice(i, 1);
+    }
+
+    // asteroids
+    for (let i = asteroids.length - 1; i >= 0; i--) {
+      const a = asteroids[i];
+      a.y += a.vy * dt;
+      a.x += a.vx * dt;
+      a.rot += a.rotSpeed * dt;
+      if (a.x < a.r) { a.x = a.r; a.vx *= -1; }
+      if (a.x > W - a.r) { a.x = W - a.r; a.vx *= -1; }
+
+      if (a.y - a.r > H) { asteroids.splice(i, 1); continue; }
+
+      // bullet collision
+      for (let j = bullets.length - 1; j >= 0; j--) {
+        const b = bullets[j];
+        if (dist2(a.x, a.y, b.x, b.y) < a.r * a.r) {
+          bullets.splice(j, 1);
+          a.hp--;
+          spawnExplosion(b.x, b.y, '#bcdfff', 5);
+          if (a.hp <= 0) {
+            comboCount++;
+            comboTimer = 1.4;
+            const base = a.r >= ASTEROID_SIZES[2] ? 30 : 15; // bigger/tougher asteroids are worth more
+            const gained = base * comboCount;
+            score += gained;
+            showCombo(comboCount, gained);
+            sfx.combo(comboCount);
+            spawnExplosion(a.x, a.y, '#ff9f4d', 24);
+            triggerShake(4, 0.15);
+            asteroids.splice(i, 1);
+            checkLevelUp();
+            updateHud();
+          }
+          break;
+        }
+      }
+
+      // player collision
+      if (asteroids[i] && player.invuln <= 0 && dist2(a.x, a.y, player.x, player.y) < (a.r + player.r * 0.7) * (a.r + player.r * 0.7)) {
+        asteroids.splice(i, 1);
+        lives--;
+        player.invuln = 2;
+        energy = clamp(energy - 15, 0, 100);
+        spawnExplosion(player.x, player.y, '#ff6b4d', 28);
+        triggerShake(14, 0.35);
+        sfx.hit();
+        updateHud();
+        if (lives <= 0) { endGame(); return; }
+      }
+    }
+
+    // orbs
+    for (let i = orbs.length - 1; i >= 0; i--) {
+      const o = orbs[i];
+      o.y += o.vy * dt;
+      o.phase += dt * 6;
+      if (o.y - o.r > H) { orbs.splice(i, 1); continue; }
+      if (dist2(o.x, o.y, player.x, player.y) < (o.r + player.r) * (o.r + player.r)) {
+        orbs.splice(i, 1);
+        if (o.type === 'spread') {
+          spreadShotTime = SPREAD_DURATION;
+          spreadIndicatorEl.classList.remove('hidden');
+          spreadBarEl.style.width = '100%';
+          score += 70;
+          spawnExplosion(o.x, o.y, '#c084ff', 20);
+          sfx.spread();
+        } else if (o.type === 'life') {
+          if (lives < MAX_LIVES) lives++; else score += 150;
+          score += 70;
+          spawnExplosion(o.x, o.y, '#ff6b8a', 20);
+          sfx.lifeUp();
+        } else {
+          score += 40;
+          energy = clamp(energy + 12, 0, 100);
+          spawnExplosion(o.x, o.y, '#ffd23f', 14);
+          sfx.orb();
+        }
+        checkLevelUp();
+        updateHud();
+      }
+    }
+
+    // particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.96; p.vy *= 0.96;
+    }
+  }
+
+  function checkLevelUp() {
+    const newLevel = levelForScore(score);
+    if (newLevel > level) {
+      level = newLevel;
+      triggerLevelUp(level);
+    }
+  }
+
+  let comboLabelTimer = 0;
+  function showCombo(n, gained) {
+    const el = document.getElementById('combo');
+    el.textContent = n > 1 ? `COMBO x${n}  +${gained}` : `+${gained}`;
+    el.style.opacity = '1';
+    comboLabelTimer = 0.9;
+  }
+
+  // ---------- Render ----------
+  // Static background (sky gradient + nebulae) is painted once per resize onto
+  // an offscreen canvas; every frame just blits it instead of redrawing 6 gradients.
+  function renderBackgroundLayer() {
+    bgCanvas.width = W * DPR;
+    bgCanvas.height = H * DPR;
+    bgCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    const bg = bgCtx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#080a16');
+    bg.addColorStop(1, '#0d1220');
+    bgCtx.fillStyle = bg;
+    bgCtx.fillRect(0, 0, W, H);
+
+    for (const n of nebulae) {
+      const cx = n.x * W, cy = n.y * H, r = n.r * Math.max(W, H);
+      const g = bgCtx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, n.color);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      bgCtx.fillStyle = g;
+      bgCtx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // A proper spiral galaxy, baked once into its own sprite (like the planet)
+  // and drawn every frame with a slow rotation — a single rotated drawImage
+  // call, so the visible "spinning galaxy" motion costs virtually nothing.
+  // Pinwheel-style arms (rotated elongated gradients around a bright core)
+  // plus a scatter of baked-in bright stars read much more like a real
+  // galaxy photo than a flat nebula blob.
+  function renderGalaxyLayer() {
+    const gsize = Math.ceil(Math.max(W, H) * 0.56);
+    const off = gsize / 2;
+    galaxyDraw = { size: gsize, offset: off };
+    galaxyCanvas.width = gsize * DPR;
+    galaxyCanvas.height = gsize * DPR;
+    galaxyCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    galaxyCtx.clearRect(0, 0, gsize, gsize);
+
+    galaxyCtx.save();
+    galaxyCtx.translate(off, off);
+    galaxyCtx.scale(1, 0.4);
+    galaxyCtx.globalCompositeOperation = 'lighter';
+
+    const armCount = 5;
+    const armLen = gsize * 0.46;
+    for (let i = 0; i < armCount; i++) {
+      const ang = (i / armCount) * Math.PI * 2;
+      galaxyCtx.save();
+      galaxyCtx.rotate(ang);
+      const g = galaxyCtx.createLinearGradient(0, 0, armLen, 0);
+      g.addColorStop(0, 'rgba(225,215,255,0.32)');
+      g.addColorStop(0.32, 'rgba(170,205,255,0.2)');
+      g.addColorStop(0.7, 'rgba(255,190,230,0.11)');
+      g.addColorStop(1, 'rgba(255,190,230,0)');
+      galaxyCtx.beginPath();
+      galaxyCtx.ellipse(armLen * 0.55, 0, armLen * 0.62, gsize * 0.07, 0.55, 0, Math.PI * 2);
+      galaxyCtx.fillStyle = g;
+      galaxyCtx.fill();
+      galaxyCtx.restore();
+    }
+
+    const halo = galaxyCtx.createRadialGradient(0, 0, gsize * 0.05, 0, 0, gsize * 0.5);
+    halo.addColorStop(0, 'rgba(210,220,255,0.16)');
+    halo.addColorStop(1, 'rgba(210,220,255,0)');
+    galaxyCtx.beginPath();
+    galaxyCtx.arc(0, 0, gsize * 0.5, 0, Math.PI * 2);
+    galaxyCtx.fillStyle = halo;
+    galaxyCtx.fill();
+
+    const core = galaxyCtx.createRadialGradient(0, 0, 0, 0, 0, gsize * 0.18);
+    core.addColorStop(0, 'rgba(255,253,245,0.55)');
+    core.addColorStop(0.45, 'rgba(255,232,195,0.32)');
+    core.addColorStop(1, 'rgba(255,232,195,0)');
+    galaxyCtx.beginPath();
+    galaxyCtx.arc(0, 0, gsize * 0.18, 0, Math.PI * 2);
+    galaxyCtx.fillStyle = core;
+    galaxyCtx.fill();
+
+    galaxyCtx.globalCompositeOperation = 'source-over';
+
+    // sprinkle of bright stars across the disc for photographic texture
+    for (let i = 0; i < 70; i++) {
+      const ang = rand(0, Math.PI * 2);
+      const dist = rand(0, gsize * 0.48);
+      const x = Math.cos(ang) * dist, y = Math.sin(ang) * dist;
+      galaxyCtx.beginPath();
+      galaxyCtx.arc(x, y, rand(0.5, 1.7), 0, Math.PI * 2);
+      galaxyCtx.fillStyle = `rgba(255,255,255,${rand(0.25, 0.55).toFixed(2)})`;
+      galaxyCtx.fill();
+    }
+    galaxyCtx.restore();
+  }
+
+  // Planet + ring is also static in appearance; render once to a small sprite
+  // and blit it at its fixed on-screen position (cheap) instead of repainting
+  // 3 gradients/strokes every frame.
+  function renderPlanetLayer() {
+    const pr = planet.r * Math.max(W, H);
+    const size = Math.ceil(pr * 4.4);
+    const off = size / 2;
+    planetDraw = { size, offset: off };
+    planetCanvas.width = size * DPR;
+    planetCanvas.height = size * DPR;
+    planetCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    planetCtx.clearRect(0, 0, size, size);
+
+    planetCtx.save();
+    planetCtx.translate(off, off);
+    planetCtx.rotate(-0.4);
+    planetCtx.beginPath();
+    planetCtx.ellipse(0, 0, pr * 1.9, pr * 0.5, 0, 0, Math.PI);
+    planetCtx.strokeStyle = 'rgba(200,190,220,0.4)';
+    planetCtx.lineWidth = pr * 0.14;
+    planetCtx.stroke();
+    planetCtx.restore();
+
+    planetCtx.save();
+    planetCtx.translate(off, off);
+    const g = planetCtx.createRadialGradient(-pr * 0.35, -pr * 0.35, pr * 0.1, 0, 0, pr);
+    g.addColorStop(0, '#a9cbe8');
+    g.addColorStop(0.5, '#5f85ab');
+    g.addColorStop(1, '#233650');
+    planetCtx.beginPath();
+    planetCtx.arc(0, 0, pr, 0, Math.PI * 2);
+    planetCtx.fillStyle = g;
+    planetCtx.fill();
+    planetCtx.restore();
+
+    // Cloud bands + day/night terminator, clipped to the sphere — gives the
+    // flat gradient fill above a much more "real planet" sense of volume.
+    planetCtx.save();
+    planetCtx.translate(off, off);
+    planetCtx.beginPath();
+    planetCtx.arc(0, 0, pr, 0, Math.PI * 2);
+    planetCtx.clip();
+
+    planetCtx.globalAlpha = 0.16;
+    planetCtx.fillStyle = '#eaf4ff';
+    for (let i = -2; i <= 2; i++) {
+      planetCtx.beginPath();
+      planetCtx.ellipse(0, i * pr * 0.34, pr * 1.05, pr * 0.11, -0.18, 0, Math.PI * 2);
+      planetCtx.fill();
+    }
+    planetCtx.globalAlpha = 1;
+
+    const term = planetCtx.createLinearGradient(-pr, -pr, pr * 0.35, pr);
+    term.addColorStop(0, 'rgba(0,0,0,0)');
+    term.addColorStop(0.6, 'rgba(0,0,0,0)');
+    term.addColorStop(1, 'rgba(2,5,12,0.78)');
+    planetCtx.fillStyle = term;
+    planetCtx.beginPath();
+    planetCtx.arc(0, 0, pr, 0, Math.PI * 2);
+    planetCtx.fill();
+    planetCtx.restore();
+
+    // thin atmospheric rim glow on the lit edge
+    planetCtx.save();
+    planetCtx.translate(off, off);
+    planetCtx.beginPath();
+    planetCtx.arc(0, 0, pr * 1.03, 0, Math.PI * 2);
+    planetCtx.strokeStyle = 'rgba(170,215,255,0.4)';
+    planetCtx.lineWidth = pr * 0.05;
+    planetCtx.stroke();
+    planetCtx.restore();
+
+    planetCtx.save();
+    planetCtx.translate(off, off);
+    planetCtx.rotate(-0.4);
+    planetCtx.beginPath();
+    planetCtx.ellipse(0, 0, pr * 1.9, pr * 0.5, 0, Math.PI, Math.PI * 2);
+    planetCtx.strokeStyle = 'rgba(220,210,235,0.55)';
+    planetCtx.lineWidth = pr * 0.14;
+    planetCtx.stroke();
+    planetCtx.restore();
+  }
+
+  // Each orb type's glow (+ optional icon) is baked once into its own small
+  // sprite and just blitted at a scaled size per orb per frame — same pattern
+  // as asteroids/planet, so adding new pickup types costs nothing per-frame.
+  function renderOrbSprites() {
+    const size = ORB_SPRITE_SIZE, mid = size / 2, r = 12;
+
+    orbCanvas.width = size * DPR; orbCanvas.height = size * DPR;
+    orbCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    orbCtx.clearRect(0, 0, size, size);
+    let g = orbCtx.createRadialGradient(mid, mid, 1, mid, mid, r);
+    g.addColorStop(0, '#fff'); g.addColorStop(0.4, '#ffd23f'); g.addColorStop(1, 'rgba(255,210,63,0)');
+    orbCtx.fillStyle = g; orbCtx.shadowColor = '#ffd23f'; orbCtx.shadowBlur = 10;
+    orbCtx.beginPath(); orbCtx.arc(mid, mid, r, 0, Math.PI * 2); orbCtx.fill();
+
+    spreadOrbCanvas.width = size * DPR; spreadOrbCanvas.height = size * DPR;
+    spreadOrbCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    spreadOrbCtx.clearRect(0, 0, size, size);
+    g = spreadOrbCtx.createRadialGradient(mid, mid, 1, mid, mid, r);
+    g.addColorStop(0, '#fff'); g.addColorStop(0.4, '#c084ff'); g.addColorStop(1, 'rgba(192,132,255,0)');
+    spreadOrbCtx.fillStyle = g; spreadOrbCtx.shadowColor = '#c084ff'; spreadOrbCtx.shadowBlur = 12;
+    spreadOrbCtx.beginPath(); spreadOrbCtx.arc(mid, mid, r, 0, Math.PI * 2); spreadOrbCtx.fill();
+    spreadOrbCtx.shadowBlur = 0;
+    spreadOrbCtx.fillStyle = '#3a1a5c';
+    for (let i = 0; i < 3; i++) {
+      const a = -Math.PI / 2 + i * (Math.PI * 2 / 3);
+      spreadOrbCtx.save();
+      spreadOrbCtx.translate(mid + Math.cos(a) * 3.5, mid + Math.sin(a) * 3.5);
+      spreadOrbCtx.rotate(a + Math.PI / 2);
+      spreadOrbCtx.beginPath();
+      spreadOrbCtx.moveTo(0, -4.5); spreadOrbCtx.lineTo(2.6, 3.5); spreadOrbCtx.lineTo(-2.6, 3.5);
+      spreadOrbCtx.closePath(); spreadOrbCtx.fill();
+      spreadOrbCtx.restore();
+    }
+
+    lifeOrbCanvas.width = size * DPR; lifeOrbCanvas.height = size * DPR;
+    lifeOrbCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    lifeOrbCtx.clearRect(0, 0, size, size);
+    g = lifeOrbCtx.createRadialGradient(mid, mid, 1, mid, mid, r);
+    g.addColorStop(0, '#fff'); g.addColorStop(0.4, '#ff6b8a'); g.addColorStop(1, 'rgba(255,107,138,0)');
+    lifeOrbCtx.fillStyle = g; lifeOrbCtx.shadowColor = '#ff6b8a'; lifeOrbCtx.shadowBlur = 12;
+    lifeOrbCtx.beginPath(); lifeOrbCtx.arc(mid, mid, r, 0, Math.PI * 2); lifeOrbCtx.fill();
+    lifeOrbCtx.shadowBlur = 0;
+    lifeOrbCtx.strokeStyle = '#6a0f28';
+    lifeOrbCtx.lineWidth = 2.4;
+    lifeOrbCtx.lineCap = 'round';
+    lifeOrbCtx.beginPath();
+    lifeOrbCtx.moveTo(mid - 4.5, mid); lifeOrbCtx.lineTo(mid + 4.5, mid);
+    lifeOrbCtx.moveTo(mid, mid - 4.5); lifeOrbCtx.lineTo(mid, mid + 4.5);
+    lifeOrbCtx.stroke();
+  }
+
+  function drawStars() {
+    for (const s of stars) {
+      const tw = 0.5 + 0.5 * Math.sin(s.phase);
+      ctx.globalAlpha = tw;
+      ctx.fillStyle = s.colorStr;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawPlanet() {
+    const px = planet.x * W - planetDraw.offset;
+    const py = planet.y * H - planetDraw.offset;
+    ctx.drawImage(planetCanvas, px, py, planetDraw.size, planetDraw.size);
+  }
+
+  function drawGalaxy() {
+    ctx.save();
+    ctx.translate(galaxy.x * W, galaxy.y * H);
+    ctx.rotate(galaxyRotation);
+    ctx.drawImage(galaxyCanvas, -galaxyDraw.offset, -galaxyDraw.offset, galaxyDraw.size, galaxyDraw.size);
+    ctx.restore();
+  }
+
+  function drawPlayer(ship, scale) {
+    ship = ship || player;
+    if (ship.invuln > 0 && Math.floor(ship.invuln * 10) % 2 === 0) return; // blink
+    ctx.save();
+    ctx.translate(ship.x, ship.y);
+    ctx.rotate(ship.tilt);
+    if (scale && scale !== 1) ctx.scale(scale, scale);
+
+    // engine flame at rear (bottom), scaled by movement speed
+    const spd = Math.hypot(ship.vx, ship.vy) / ship.speed;
+    const flameLen = 16 + spd * 34 + Math.sin(ship.thrusterPhase) * 4;
+    const flameGrad = ctx.createLinearGradient(0, 26, 0, 26 + flameLen);
+    flameGrad.addColorStop(0, 'rgba(255,190,90,0.9)');
+    flameGrad.addColorStop(1, 'rgba(255,80,40,0)');
+    ctx.beginPath();
+    ctx.moveTo(-11, 24);
+    ctx.lineTo(0, 24 + flameLen);
+    ctx.lineTo(11, 24);
+    ctx.closePath();
+    ctx.fillStyle = flameGrad;
+    ctx.fill();
+
+    // hull (nose up, much larger silhouette)
+    ctx.beginPath();
+    ctx.moveTo(0, -42);
+    ctx.lineTo(12, -13);
+    ctx.lineTo(27, 17);
+    ctx.lineTo(13, 31);
+    ctx.lineTo(0, 21);
+    ctx.lineTo(-13, 31);
+    ctx.lineTo(-27, 17);
+    ctx.lineTo(-12, -13);
+    ctx.closePath();
+    ctx.fillStyle = playerHullGrad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(6,10,16,0.85)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    // wing accent stripes
+    ctx.strokeStyle = '#4fa8ff';
+    ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(-27, 17); ctx.lineTo(-14, 29); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(27, 17); ctx.lineTo(14, 29); ctx.stroke();
+
+    // cockpit
+    ctx.beginPath();
+    ctx.ellipse(0, -16, 6.5, 10, 0, 0, Math.PI * 2);
+    ctx.fillStyle = playerCockpitGrad;
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawAsteroids() {
+    for (const a of asteroids) {
+      ctx.save();
+      ctx.translate(a.x, a.y);
+      ctx.rotate(a.rot);
+      ctx.drawImage(a.sprite.canvas, -a.sprite.offset, -a.sprite.offset, a.sprite.size, a.sprite.size);
+      ctx.restore();
+    }
+  }
+
+  function drawOrbs() {
+    for (const o of orbs) {
+      const pulse = 1 + Math.sin(o.phase) * 0.18;
+      const d = ORB_SPRITE_SIZE * pulse;
+      const sprite = o.type === 'spread' ? spreadOrbCanvas : o.type === 'life' ? lifeOrbCanvas : orbCanvas;
+      ctx.drawImage(sprite, o.x - d / 2, o.y - d / 2, d, d);
+    }
+  }
+
+  function drawBullets() {
+    // Trailing endpoint is derived from each bullet's velocity vector (no
+    // per-bullet transform needed), so every bullet — straight or angled —
+    // still draws in a single batched path/stroke call per color.
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#bfe9ff';
+    ctx.beginPath();
+    for (const b of bullets) {
+      if (b.spread) continue;
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - b.vx * 0.018, b.y - b.vy * 0.018);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = '#d9a8ff';
+    ctx.beginPath();
+    for (const b of bullets) {
+      if (!b.spread) continue;
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - b.vx * 0.018, b.y - b.vy * 0.018);
+    }
+    ctx.stroke();
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      const alpha = clamp(p.life / p.maxLife, 0, 1);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = alpha;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.drawImage(bgCanvas, 0, 0, W, H);
+
+    ctx.save();
+    if (shakeTime > 0) {
+      const m = shakeMag * (shakeTime / 0.35);
+      ctx.translate(rand(-m, m), rand(-m, m));
+    } else {
+      shakeMag = 0;
+    }
+
+    drawGalaxy();
+    drawStars();
+    drawPlanet();
+
+    if (state === 'playing' || state === 'paused' || state === 'gameover') {
+      drawOrbs();
+      drawAsteroids();
+      drawBullets();
+      drawPlayer(player);
+      drawParticles();
+    } else if (state === 'start') {
+      drawPlayer(decoShip, DECO_SHIP_SCALE);
+    }
+
+    ctx.restore();
+
+    if (comboLabelTimer > 0) {
+      comboLabelTimer -= 1 / 60;
+      if (comboLabelTimer <= 0) document.getElementById('combo').style.opacity = '0';
+    }
+  }
+
+  resize();
+  initStars();
+  buildAsteroidSpritePool();
+  requestAnimationFrame((t) => { lastTime = t; requestAnimationFrame(loop); });
+})();
+</script>
+<script>
+  // Registering a service worker is one of the requirements Chrome/Android
+  // checks before offering "Install app" — this also makes the game playable
+  // offline once installed. Only works over http(s) (not file://), and any
+  // failure here must never break the game itself, hence the guards.
+  if ('serviceWorker' in navigator && (location.protocol === 'http:' || location.protocol === 'https:')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
