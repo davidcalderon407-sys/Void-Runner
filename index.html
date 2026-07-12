@@ -285,17 +285,15 @@
   #touchControls { position: absolute; inset: 0; z-index: 4; }
   #touchControls.hidden { display: none; }
   #moveJoystickZone { position: absolute; left: 0; bottom: 0; width: 55%; height: 100%; }
-  .joyBase {
-    position: fixed; width: 112px; height: 112px; border-radius: 50%;
+  /* Direct drag-to-position control: the ship glides to wherever the thumb
+     is (see createDragMover), so this marker is just a visual "here's your
+     finger" dot — there's no elastic joystick offset/knob to model anymore. */
+  #moveTouchMarker {
+    position: fixed; width: 64px; height: 64px; border-radius: 50%;
     transform: translate(-50%,-50%); opacity: 0; transition: opacity 0.05s ease;
     pointer-events: none; z-index: 6;
-    border: 2px solid rgba(79,168,255,0.55); background: rgba(30,45,70,0.35);
-  }
-  .joyKnob {
-    position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, #cfe8ff, #4fa8ff 60%, #1c4f80 100%);
-    box-shadow: 0 0 14px rgba(79,168,255,0.6);
-    transform: translate(-50%,-50%);
+    border: 2px solid rgba(79,168,255,0.55);
+    background: radial-gradient(circle, rgba(79,168,255,0.18), rgba(30,45,70,0.12));
   }
   #shootZone {
     position: absolute; right: 24px; bottom: 24px;
@@ -349,7 +347,7 @@
 
 <div id="touchControls" class="hidden">
   <div id="moveJoystickZone">
-    <div id="moveJoystickBase" class="joyBase"><div class="joyKnob"></div></div>
+    <div id="moveTouchMarker"></div>
   </div>
   <div id="shootZone">FUEGO</div>
 </div>
@@ -661,46 +659,39 @@
   }, { passive: false });
   window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
-  // ---------- Input: touch (floating move joystick + fire button) ----------
-  function createJoystick(zoneEl, baseEl, knobEl, onMove, onEnd) {
-    let active = false, origin = { x: 0, y: 0 };
-    const RADIUS = 56; // visual clamp for the knob, so it stays within the base graphic
-    // Full-strength output is reached well before the thumb travels the whole
-    // visual radius — a real thumb drag on a phone is usually a short, quick
-    // flick, and requiring it to cross the full 56px before the ship got any
-    // real acceleration was the main reason touch felt sluggish/delayed
-    // compared to keyboard (which is always at full ±1 strength instantly).
-    const RESPONSE_RADIUS = 26;
+  // ---------- Input: touch (direct drag-to-position move zone + fire button) ----------
+  // The ship glides straight to wherever the thumb is, instead of a relative
+  // joystick driving an acceleration model — no velocity curve to tune means
+  // no "too slow" / "too much acceleration" middle ground to fight, the ship
+  // just goes where you put your finger.
+  function createDragMover(zoneEl, markerEl, onMove, onEnd) {
+    let active = false;
     function start(x, y) {
-      active = true; origin = { x, y };
-      baseEl.style.left = x + 'px'; baseEl.style.top = y + 'px'; baseEl.style.opacity = '1';
-      knobEl.style.transform = 'translate(-50%,-50%)';
+      active = true;
+      markerEl.style.left = x + 'px'; markerEl.style.top = y + 'px'; markerEl.style.opacity = '1';
+      onMove(x, y);
     }
     function move(x, y) {
       if (!active) return;
-      let dx = x - origin.x, dy = y - origin.y;
-      const d = Math.hypot(dx, dy);
-      if (d > RADIUS) { dx = dx / d * RADIUS; dy = dy / d * RADIUS; }
-      knobEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-      const ox = clamp(dx / RESPONSE_RADIUS, -1, 1);
-      const oy = clamp(dy / RESPONSE_RADIUS, -1, 1);
-      onMove(ox, oy);
+      markerEl.style.left = x + 'px'; markerEl.style.top = y + 'px';
+      onMove(x, y);
     }
-    function end() { active = false; baseEl.style.opacity = '0'; onEnd(); }
-    zoneEl.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.changedTouches[0]; start(t.clientX, t.clientY); move(t.clientX, t.clientY); }, { passive: false });
+    function end() { active = false; markerEl.style.opacity = '0'; onEnd(); }
+    zoneEl.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.changedTouches[0]; start(t.clientX, t.clientY); }, { passive: false });
     zoneEl.addEventListener('touchmove', (e) => { e.preventDefault(); const t = e.changedTouches[0]; move(t.clientX, t.clientY); }, { passive: false });
     zoneEl.addEventListener('touchend', (e) => { e.preventDefault(); end(); }, { passive: false });
     zoneEl.addEventListener('touchcancel', () => end());
     return { isActive: () => active };
   }
 
-  let joyDirX = 0, joyDirY = 0;
-  createJoystick(
+  let touchTargetX = 0, touchTargetY = 0;
+  // Target sits above the fingertip so the ship isn't hidden under the thumb.
+  const TOUCH_TARGET_Y_OFFSET = -80;
+  const moveDrag = createDragMover(
     document.getElementById('moveJoystickZone'),
-    document.getElementById('moveJoystickBase'),
-    document.querySelector('#moveJoystickBase .joyKnob'),
-    (dx, dy) => { joyDirX = dx; joyDirY = dy; },
-    () => { joyDirX = 0; joyDirY = 0; }
+    document.getElementById('moveTouchMarker'),
+    (x, y) => { touchTargetX = x; touchTargetY = y + TOUCH_TARGET_Y_OFFSET; },
+    () => {}
   );
 
   let touchShoot = false;
@@ -994,25 +985,39 @@
     elapsed += dt;
 
     // player movement
-    const left = keys['ArrowLeft'] || keys['KeyA'];
-    const right = keys['ArrowRight'] || keys['KeyD'];
-    const up = keys['ArrowUp'] || keys['KeyW'];
-    const down = keys['ArrowDown'] || keys['KeyS'];
-    let axisX = (right ? 1 : 0) - (left ? 1 : 0);
-    let axisY = (down ? 1 : 0) - (up ? 1 : 0);
-    if (joyDirX !== 0 || joyDirY !== 0) { axisX = joyDirX; axisY = joyDirY; }
+    if (moveDrag.isActive()) {
+      // Direct drag-to-position: glide toward the finger every frame. No
+      // acceleration/velocity model here at all, so there's nothing to feel
+      // "too slow" or "too twitchy" — the ship's position is just the
+      // target, smoothed so it doesn't visually snap/teleport each frame.
+      const followT = clamp(dt * 16, 0, 1);
+      const prevX = player.x, prevY = player.y;
+      player.x += (touchTargetX - player.x) * followT;
+      player.y += (touchTargetY - player.y) * followT;
+      player.x = clamp(player.x, player.r, W - player.r);
+      player.y = clamp(player.y, 100, H - 40);
+      player.vx = clamp((player.x - prevX) / dt, -player.speed, player.speed);
+      player.vy = clamp((player.y - prevY) / dt, -player.speed, player.speed);
+    } else {
+      const left = keys['ArrowLeft'] || keys['KeyA'];
+      const right = keys['ArrowRight'] || keys['KeyD'];
+      const up = keys['ArrowUp'] || keys['KeyW'];
+      const down = keys['ArrowDown'] || keys['KeyS'];
+      const axisX = (right ? 1 : 0) - (left ? 1 : 0);
+      const axisY = (down ? 1 : 0) - (up ? 1 : 0);
 
-    player.vx += axisX * player.speed * 7 * dt;
-    player.vx *= Math.pow(0.0007, dt);
-    player.vx = clamp(player.vx, -player.speed, player.speed);
-    player.x += player.vx * dt;
-    player.x = clamp(player.x, player.r, W - player.r);
+      player.vx += axisX * player.speed * 4.2 * dt;
+      player.vx *= Math.pow(0.0007, dt);
+      player.vx = clamp(player.vx, -player.speed, player.speed);
+      player.x += player.vx * dt;
+      player.x = clamp(player.x, player.r, W - player.r);
 
-    player.vy += axisY * player.speed * 7 * dt;
-    player.vy *= Math.pow(0.0007, dt);
-    player.vy = clamp(player.vy, -player.speed, player.speed);
-    player.y += player.vy * dt;
-    player.y = clamp(player.y, 100, H - 40);
+      player.vy += axisY * player.speed * 4.2 * dt;
+      player.vy *= Math.pow(0.0007, dt);
+      player.vy = clamp(player.vy, -player.speed, player.speed);
+      player.y += player.vy * dt;
+      player.y = clamp(player.y, 100, H - 40);
+    }
 
     const targetTilt = clamp(player.vx / player.speed, -1, 1) * 0.3;
     player.tilt += (targetTilt - player.tilt) * clamp(dt * 10, 0, 1);
