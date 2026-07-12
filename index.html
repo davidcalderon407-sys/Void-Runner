@@ -287,7 +287,7 @@
   #moveJoystickZone { position: absolute; left: 0; bottom: 0; width: 55%; height: 100%; }
   .joyBase {
     position: fixed; width: 112px; height: 112px; border-radius: 50%;
-    transform: translate(-50%,-50%); opacity: 0; transition: opacity 0.15s ease;
+    transform: translate(-50%,-50%); opacity: 0; transition: opacity 0.05s ease;
     pointer-events: none; z-index: 6;
     border: 2px solid rgba(79,168,255,0.55); background: rgba(30,45,70,0.35);
   }
@@ -664,7 +664,13 @@
   // ---------- Input: touch (floating move joystick + fire button) ----------
   function createJoystick(zoneEl, baseEl, knobEl, onMove, onEnd) {
     let active = false, origin = { x: 0, y: 0 };
-    const RADIUS = 56;
+    const RADIUS = 56; // visual clamp for the knob, so it stays within the base graphic
+    // Full-strength output is reached well before the thumb travels the whole
+    // visual radius — a real thumb drag on a phone is usually a short, quick
+    // flick, and requiring it to cross the full 56px before the ship got any
+    // real acceleration was the main reason touch felt sluggish/delayed
+    // compared to keyboard (which is always at full ±1 strength instantly).
+    const RESPONSE_RADIUS = 26;
     function start(x, y) {
       active = true; origin = { x, y };
       baseEl.style.left = x + 'px'; baseEl.style.top = y + 'px'; baseEl.style.opacity = '1';
@@ -676,10 +682,12 @@
       const d = Math.hypot(dx, dy);
       if (d > RADIUS) { dx = dx / d * RADIUS; dy = dy / d * RADIUS; }
       knobEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-      onMove(dx / RADIUS, dy / RADIUS);
+      const ox = clamp(dx / RESPONSE_RADIUS, -1, 1);
+      const oy = clamp(dy / RESPONSE_RADIUS, -1, 1);
+      onMove(ox, oy);
     }
     function end() { active = false; baseEl.style.opacity = '0'; onEnd(); }
-    zoneEl.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.changedTouches[0]; start(t.clientX, t.clientY); }, { passive: false });
+    zoneEl.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.changedTouches[0]; start(t.clientX, t.clientY); move(t.clientX, t.clientY); }, { passive: false });
     zoneEl.addEventListener('touchmove', (e) => { e.preventDefault(); const t = e.changedTouches[0]; move(t.clientX, t.clientY); }, { passive: false });
     zoneEl.addEventListener('touchend', (e) => { e.preventDefault(); end(); }, { passive: false });
     zoneEl.addEventListener('touchcancel', () => end());
@@ -994,13 +1002,13 @@
     let axisY = (down ? 1 : 0) - (up ? 1 : 0);
     if (joyDirX !== 0 || joyDirY !== 0) { axisX = joyDirX; axisY = joyDirY; }
 
-    player.vx += axisX * player.speed * 4.2 * dt;
+    player.vx += axisX * player.speed * 7 * dt;
     player.vx *= Math.pow(0.0007, dt);
     player.vx = clamp(player.vx, -player.speed, player.speed);
     player.x += player.vx * dt;
     player.x = clamp(player.x, player.r, W - player.r);
 
-    player.vy += axisY * player.speed * 4.2 * dt;
+    player.vy += axisY * player.speed * 7 * dt;
     player.vy *= Math.pow(0.0007, dt);
     player.vy = clamp(player.vy, -player.speed, player.speed);
     player.y += player.vy * dt;
